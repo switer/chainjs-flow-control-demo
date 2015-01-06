@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="HandheldFriendly" content="true">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Chainjs flow-control example</title>
+    <script src="../lib/zepto.min.js"></script>
+    <script src="../lib/chain.js"></script>
+</head>
+<body>
+<style>
+    .searchbar {position: absolute;left: 0;right: 0;margin: auto;top: 50px;width: 300px;text-align: center;}
+        .searchbar .logo {margin-bottom: 50px;}
+        .searchbar input {}
+        .searchbar button {}
+        .searchbar .results {background-color: #fbfbfb;padding: 10px;list-style: none;padding-top: 0;
+            box-shadow: 0 2px 12px 1px rgba(0,0,0,.1)}
+            .searchbar .results.hide {display: none}
+            .searchbar .results li {line-height: 30px;text-align: left;}
+</style>
+<div id="searchbar-tpl">
+    <div class="searchbar">
+        <!-- search input -->
+        <img src="../images/logo.png" alt="logo" class="logo">
+        <input type="text" name="keyword" 
+            on-input="onInput" 
+            on-focus="onFocus" 
+            on-blur="onBlur" />
+        <!-- action buttons -->
+        <button on-click="onSearch">Search</button> <button on-click="onClear">Clear</button>
+        <!-- result list -->
+        <ul class="results hide"></ul>
+    </div>
+</div>
+<script>
+    // mock
+    var request = function (url, params, success, fail) {
+        console.log('%cXHR: ' + url, 'color: blue')
+        var source = ['chainjs', 'flow', 'control', 'design', 'by', 'switer']
+        switch(url) {
+            case '/search': success( source.slice(0, Math.round(Math.random()*source.length) || 1 ) )
+        }
+    }
+    // component define
+    var Component = {
+        template: "#searchbar-tpl",
+        mount: function (con) {
+            // mount
+            var el = document.createElement('div')  
+            this.$el = $(el).html($('body').find(this.template))
+            $(con).append(this.$el)
+            // initial state
+            this.state = {}
+            // bind events
+            ;['click','focus', 'blur', 'change', 'input'].forEach(function (evtType) {
+                var $els = this.$el.find('[on-' + evtType + ']')
+                var ctx = this
+                $els.each(function (i, el) {
+                    el.addEventListener(evtType, ctx[$(el).attr('on-' + evtType)].bind(ctx))
+                })
+            }.bind(this))
+
+            return this
+        },
+        onInput: function (e) {
+            // Event handler is a data collector and flow controler
+            this._searchAndShowResults_flow(e.target.value)
+        },
+        onFocus: function (e) {
+            // Event handler is a data collector and flow controler
+            this._searchAndShowResults_flow(e.target.value)
+        },
+        onBlur: function () {
+            this._hideResultList()
+        },
+        onSearch: function (e) {
+            var keyword = this.$el.find('input').val()
+            window.location.href = '/?q=' + keyword
+        },
+        onClear: function () {
+            this.$el.find('input').val('')
+        },
+        /**
+         *  A reusable business flow, here you can see the flow clearly.
+         *  Chain.js currently recommend flatten flow that without branch,
+         *  but it support branch goto.
+         *  --------------
+         *  |            ↓
+         *  o----->o---->o---->o
+         */
+        _searchAndShowResults_flow: function (value) {
+
+            var MAX_RETRY_TIMES = 3
+            Chain(function (chain) { // step: data validate
+                    console.time('flow')
+                    value = value.trim()
+                    if (this._validInput(value)) {
+                        // flow-branch goto
+                        if (!value) return chain.nextTo('empty')
+                        chain.next(value)
+                    } else {
+                        chain.end()
+                    }
+                })
+                .then(function (chain, keyword){ // step: network request
+                    var retryTimes = chain.data('retry') || 0
+                    this._search(keyword, function (err, data) {
+                        if (err) {
+                            chain.data('retry', retryTimes + 1)
+                            retryTimes < MAX_RETRY_TIMES ? chain.retry() : chain.end()
+                        } else {
+                            chain.next(data)
+                        }
+                    })
+                })
+                .then(function (chain, results) { // step: deal with reponse data
+                    if (!results || !results.length) return chain.next(false)
+                    this._renderResults(results)
+                    chain.next(results.length)
+                })
+                .branch('empty', function (chain) { // branch: when first step check a empty value input
+                    // only calling .nextTo() method to goto branch step 
+                    chain.next(false)
+                }) 
+                .then(function (chain, isShowList) { // step: View UI react
+                    console.timeEnd('flow')
+                    isShowList ? this._showResultList() : this._hideResultList()
+                })
+                .context(this)
+                .start()
+        },
+        _validInput: function (value) {
+            switch (true) {
+                // case (value.length):
+                case (/^[a-zA-Z0-9]*$/.test(value)): return true;
+            }
+        },
+        /**
+         *  @async
+         */
+        _search: function (value, callback) {
+            request('/search', {
+                keyword: value
+            }, function (data) {
+                callback(null, data)
+            }, function (err) {
+                callback(err)
+            })
+        },
+        _renderResults: function (items) {
+            this.$el.find('.results').html(
+                items.map(function (item) {
+                    return '<li>%s</li>'.replace('%s', item)
+                }).join('')
+            )
+        },
+        /**
+         *  List visible DOM manipulations
+         */
+        _showResultList: function () {
+            this.$el.find('.results').removeClass('hide')
+        },
+        _hideResultList: function () {
+            this.$el.find('.results').addClass('hide')
+        }
+    }
+
+    // initialize
+    !function main () {
+        Component.mount(document.body)
+    }();
+</script>
+</body>
+</html>
